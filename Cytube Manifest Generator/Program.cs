@@ -6,6 +6,8 @@ using System.Linq;
 using MediaToolkit;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using System.Diagnostics;
+using System.Reflection;
 
 namespace Cytube_Manifest_Generator
 {
@@ -13,6 +15,14 @@ namespace Cytube_Manifest_Generator
     {
         static void Main(string[] args)
         {
+            // Check for no args (no files)
+            if (args.Length <= 0)
+            {
+                Console.WriteLine("Drag and drop files onto this exe to use.");
+                Console.ReadKey();
+                Environment.Exit(404);
+            }
+
             // Set up dictionary to store values from the foreach below
             var dict = new Dictionary<string, FileInfo>();
             string[] supportedVideo = { ".mp4", ".m4a", ".webm", ".ogg", ".aac" };
@@ -200,6 +210,7 @@ namespace Cytube_Manifest_Generator
         public static Tuple<int, int, long, int> GetVideoInfo(string fileName)
         {
             var inputFile = new MediaToolkit.Model.MediaFile { Filename = fileName };
+
             using (var engine = new Engine())
             {
                 engine.GetMetadata(inputFile);
@@ -215,8 +226,27 @@ namespace Cytube_Manifest_Generator
         // Read the config file
         private static IConfiguration BuildConfig()
         {
+            // this whole thing is very questionable.
+            // - System.Reflection.Assembly.GetEntryAssembly().Location 
+            // - AppDomain.CurrentDomain.BaseDirectory
+            // - Path.GetDirectoryName(Assembly.GetEntryAssembly().Location)
+            // - System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+            // - System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)
+            // All would give me the temp file (that doesn't exist) the single-file app created.
+            // - System.IO.Directory.GetCurrentDirectory()
+            // - Environment.CurrentDirectory
+            // Would give me the path of the media files, not the exe.
+            // - System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase)
+            // outputs "Unhandled exception. System.ArgumentException: The path must be absolute. (Parameter 'root')"
+            //
+            // In the end I had to use System.Diagnostics and Process.GetCurrentProcess() to get the path of the REAL exe,
+            // and then some finagling to remove the name of the exe.
+
+            var configlocation = Process.GetCurrentProcess().MainModule.FileName;
+            var filename = Process.GetCurrentProcess().ProcessName;
+
             return new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
+                .SetBasePath(configlocation.Substring(0, configlocation.Length - (filename.Length + 5)))
                 .AddJsonFile("config.json")
                 .Build();
         }

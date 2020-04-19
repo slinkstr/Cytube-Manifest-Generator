@@ -349,3 +349,4 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 Cytube Manifest Generator/Properties/launchSettings.json
+*.exe
