@@ -66,7 +66,7 @@ namespace Cytube_Manifest_Generator
                         url = baseUrl + subfolder + filename,
                         contentType = "text/" + extension,
                         name = "Subtitles " + i,
-                        isDefault = false
+                        isDefault = !(textTracks.Count > 1)
                     };
                     textTracks.Add(tt);
                 }
