@@ -4,11 +4,8 @@ using System.IO;
 using System.Linq;
 using MediaToolkit;
 using MediaToolkit.Model;
-using System.Text;
 using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
-using System.Reflection;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Cytube_Manifest_Generator
