@@ -63,7 +63,7 @@ namespace Cytube_Manifest_Generator
                         url = baseUrl + subfolder + filename,
                         contentType = "text/" + extension,
                         name = "Subtitles " + i,
-                        isDefault = !(textTracks.Count > 1)
+                        isDefault = textTracks.Count == 0
                     };
                     textTracks.Add(tt);
                 }
@@ -99,7 +99,6 @@ namespace Cytube_Manifest_Generator
             if (unsupportedType)
             {
                 Console.WriteLine("Valid file types: " + string.Join(", ", allSupportedTypes));
-                Exit();
             }
             // only text tracks provided
             if (sources.Count < 1)
@@ -143,10 +142,12 @@ namespace Cytube_Manifest_Generator
 
             // By default, browsers block requests for WebVTT tracks hosted on different domains than the current page. 
             // In order for text tracks to work cross-origin, the Access-Control-Allow-Origin header needs to be set by the remote server when serving the VTT file.
-            if (textTracks.Count > 0)
+            if (textTracks.Count > 0 && config["generateHtaccess"].Equals("True", StringComparison.OrdinalIgnoreCase))
             {
                 File.WriteAllText(subfolder + ".htaccess", "Header set Access-Control-Allow-Origin \"*\"");
             }
+
+            Exit();
         }
 
         public static void Exit()
