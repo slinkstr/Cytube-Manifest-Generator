@@ -1,219 +1,353 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using MediaToolkit;
-using MediaToolkit.Model;
-using Microsoft.Extensions.Configuration;
-using System.Diagnostics;
-using Newtonsoft.Json.Linq;
+﻿using System.Diagnostics;
+using System.Text;
+using Newtonsoft.Json;
 
-namespace Cytube_Manifest_Generator
+internal class Program
 {
-    class Program
+    public static ProgramConfig config;
+
+    private static void Main(string[] args)
     {
-        static void Main(string[] args)
+        ProgramConfig.CreateConfigIfMissing();
+        config = ProgramConfig.LoadConfig();
+
+        if(!config.BaseURL.StartsWith("https://"))
         {
-            // valid formats retrieved from https://github.com/calzoneman/sync/blob/3.0/docs/custom-media.md
-            List<string> supportedSourceTypes = new List<string>() { "mp4", "webm", "ogg", "aac", "ogg", "mpeg" };
-            List<string> supportedTextTypes = new List<string>() { "vtt" };
-            List<int> supportedQualityLevels = new List<int>() { 240, 360, 480, 540, 720, 1080, 1440, 2160 };
+            Console.WriteLine("Base URL does not begin with \"https://\".");
+            Console.WriteLine("Cytube will reject your media - aborting.");
+            ExitPrompt();
+        }
 
-            IConfiguration config = BuildConfig();
-            string baseUrl = config["baseUrl"].Trim('/') + "/";
+        if (args.Length < 1)
+        {
+            Console.WriteLine($"Usage: {Process.GetCurrentProcess().ProcessName}.exe media_file.mp4 text_track.vtt");
+            Console.WriteLine($"       Alternatively drag and drop media files onto the executable.");
+            ExitPrompt();
+        }
 
-            if (args.Length < 1)
+        string folderPrefix = "";
+        if (args.Length == 1 && Directory.Exists(args[0]))
+        {
+            var directoryInfo = new DirectoryInfo(args[0]);
+            folderPrefix = directoryInfo.Name + "/";
+            var fileList = Directory.GetFiles(directoryInfo.FullName);
+            args = fileList;
+        }
+
+        Manifest manifest = ProcessFiles(args, folderPrefix);
+        if(manifest.sources.Count == 0)
+        {
+            Console.WriteLine("Unable to create manifest: No primary source found.");
+            ExitPrompt();
+        }
+
+        string outputFolder = Path.GetDirectoryName(manifest.sources.First().filepath);
+        string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
+        File.WriteAllText(outputFolder + "/" + manifest.sources.First().FilenameNoExtension() + ".json", jsonText);
+
+        if(config.CreateHTAccess && manifest.textTracks.Count > 0)
+        {
+            File.WriteAllText(outputFolder + "/.htaccess", "Header set Access-Control-Allow-Origin \"*\"");
+            Console.WriteLine("Wrote htaccess to " + outputFolder);
+            ExitPrompt();
+        }
+    }
+
+    private static Manifest ProcessFiles(string[] files, string folderPrefix)
+    {
+        Manifest manifest = new Manifest();
+
+        bool firstSource = true;
+        foreach (string file in files)
+        {
+            if(VideoSource.IsFileValid(file))
             {
-                Console.WriteLine($"Drag and drop media files or a folder of media files onto {Process.GetCurrentProcess().ProcessName}.exe");
-                Exit();
-            }
-
-            // get all files inside a folder
-            string subfolder = "";
-            if (args.Length == 1)
-            {
-                var attr = File.GetAttributes(args[0]);
-                if (attr.HasFlag(FileAttributes.Directory))
+                VideoSource vid = new VideoSource(file, folderPrefix);
+                manifest.sources.Add(vid);
+                if(firstSource)
                 {
-                    subfolder = args[0].Split('\\').Last() + "/";
-                    var fileList = Directory.GetFiles(args[0]);
-                    args = fileList;
+                    manifest.title = vid.Title();
+                    manifest.duration = vid.duration;
+                    firstSource = false;
                 }
             }
-
-            var allSupportedTypes = supportedSourceTypes.Concat(supportedTextTypes);
-            bool unsupportedType = false;
-            List<Source> sources = new List<Source>();
-            List<TextTrack> textTracks = new List<TextTrack>();
-            for (int i = 0; i < args.Length; i++)
+            else if (AudioSource.IsFileValid(file))
             {
-                // unsupported file format
-                if (!allSupportedTypes.Any(x => args[i].EndsWith(x)))
-                {
-                    Console.WriteLine($"Unsupported file type: {args[i]}");
-                    unsupportedType = true;
-                }
-                // text tracks
-                else if (supportedTextTypes.Any(x => args[i].EndsWith(x)))
-                {
-                    string filename = args[i].Split('\\').Last();
-                    string extension = filename.Split('.').Last();
-                    TextTrack tt = new TextTrack()
-                    {
-                        url = baseUrl + subfolder + filename,
-                        contentType = "text/" + extension,
-                        name = "Subtitles " + i,
-                        isDefault = textTracks.Count == 0
-                    };
-                    textTracks.Add(tt);
-                }
-                // video/audio tracks
-                else
-                {
-                    string filename = args[i].Split('\\').Last();
-                    string extension = filename.Split('.').Last();
-                    Metadata md = GetVideoInfo(args[i]);
-                    int quality = supportedQualityLevels.First();
-                    for (int j = 0; j < supportedQualityLevels.Count; j++)
-                    {
-                        int frameHeight = int.Parse(md.VideoData.FrameSize.Split('x')[1]);
-                        if (frameHeight >= supportedQualityLevels[j])
-                        {
-                            quality = supportedQualityLevels[j];
-                        }
-                    }
-
-                    int totalBitrate = (md.VideoData.BitRateKbs ?? 0) + md.AudioData.BitRateKbs;
-
-                    Source s = new Source()
-                    {
-                        url = baseUrl + subfolder + filename,
-                        contentType = "video/" + extension,
-                        quality = quality,
-                        bitrate = totalBitrate,
-                        duration = Convert.ToInt32(md.Duration.TotalSeconds)
-                    };
-                    sources.Add(s);
-                }
+                manifest.audioTracks.Add(new AudioSource(file, folderPrefix));
             }
-            if (unsupportedType)
+            else if (TextSource.IsFileValid(file))
             {
-                Console.WriteLine("Valid file types: " + string.Join(", ", allSupportedTypes));
+                manifest.textTracks.Add(new TextSource(file, folderPrefix));
             }
-            // only text tracks provided
-            if (sources.Count < 1)
+            else
             {
-                Console.WriteLine("No source files provided.");
-                Console.WriteLine("Valid source file types: " + string.Join(", ", supportedSourceTypes));
-                Exit();
+                Console.WriteLine("File was not valid: " + file);
             }
+        }
 
-            string title = sources.First().url.Split('/').Last().Split('.').First();
+        return manifest;
+    }
 
-            JObject json = new JObject(
-                new JProperty("title", title),
-                new JProperty("duration", sources.First().duration),
-                new JProperty("live", false),
-                new JProperty("sources",
-                    new JArray(
-                        from s in sources
-                        select new JObject(
-                            new JProperty("url", s.url),
-                            new JProperty("contentType", s.contentType),
-                            new JProperty("quality", s.quality),
-                            new JProperty("bitrate", s.bitrate)
-                        )
-                    )
-                ),
-                new JProperty("textTracks",
-                    new JArray(
-                        from t in textTracks
-                        select new JObject(
-                            new JProperty("url", t.url),
-                            new JProperty("contentType", t.contentType),
-                            new JProperty("name", t.name),
-                            new JProperty("default", t.isDefault)
-                        )
-                    )
-                )
-            );
+    private static void ExitPrompt()
+    {
+        Console.WriteLine("Press any key to continue...");
+        Console.ReadKey();
+        Environment.Exit(0);
+    }
+}
 
-            File.WriteAllText(subfolder + json["title"] + ".json", json.ToString());
+public class Manifest
+{
+    public string title { get; set; }
+    public int duration { get; set; }
+    public bool live { get; set; } = false;
+    public List<VideoSource> sources { get; set; } = new List<VideoSource>();
+    public List<AudioSource> audioTracks { get; set; } = new List<AudioSource>();
+    public List<TextSource> textTracks { get; set; } = new List<TextSource>();
+}
 
-            // By default, browsers block requests for WebVTT tracks hosted on different domains than the current page. 
-            // In order for text tracks to work cross-origin, the Access-Control-Allow-Origin header needs to be set by the remote server when serving the VTT file.
-            if (textTracks.Count > 0 && config["generateHtaccess"].Equals("True", StringComparison.OrdinalIgnoreCase))
+public class Source
+{
+    [JsonIgnore]
+    public string filepath { get; set; }
+    public string url { get; set; }
+    public string contentType { get; set; }
+
+    public string Filename()
+    {
+        return Path.GetFileName(filepath);
+    }
+
+    public string FilenameNoExtension()
+    {
+        int lastPeriodIndex = Filename().LastIndexOf(".");
+        if (lastPeriodIndex == -1)
+        {
+            throw new Exception("No file extension found for " + filepath);
+        }
+
+        return Filename()[..lastPeriodIndex];
+    }
+
+    public string Extension()
+    {
+        int lastPeriodIndex = Filename().LastIndexOf(".");
+        if (lastPeriodIndex == -1)
+        {
+            throw new Exception("No file extension found for " + filepath);
+        }
+
+        return Filename()[lastPeriodIndex..];
+    }
+
+    public string Title()
+    {
+        return FilenameNoExtension().Replace("_", " ");
+    }
+}
+
+public class VideoSource : Source
+{
+    public int quality { get; set; }
+    public int bitrate { get; set; }
+    [JsonIgnore]
+    public int duration { get; set; } // not required for the source but a useful property to have
+
+    public static Dictionary<string, string> MIMEMap = new()
+    {
+        { ".mp4", "video/mp4" },
+        { ".webm", "video/webm" },
+        { ".ogv", "video/ogg" },
+    };
+
+    public VideoSource(string path, string folderPrefix)
+    {
+        filepath = path;
+        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        contentType = MIMEMap[Extension()];
+        quality = GetClosestQuality(ffprobe.Quality(filepath));
+        bitrate = ffprobe.Bitrate(filepath) / 1000;
+        duration = ffprobe.Duration(filepath);
+    }
+
+    public static bool IsFileValid(string path)
+    {
+        foreach(KeyValuePair<string, string> entry in MIMEMap)
+        {
+            if(path.EndsWith(entry.Key.ToString()))
             {
-                File.WriteAllText(subfolder + ".htaccess", "Header set Access-Control-Allow-Origin \"*\"");
+                return true;
             }
-
-            Exit();
         }
+        return false;
+    }
 
-        public static void Exit()
+    public static int GetClosestQuality(int quality)
+    {
+        List<int> supportedQualities = new List<int>()
         {
-            Console.WriteLine();
-            Console.WriteLine("Press any key to continue...");
-            Console.ReadKey();
-            Environment.Exit(0);
-        }
+            240,
+            360,
+            480,
+            540,
+            720,
+            1080,
+            1440,
+            2160,
+        };
 
-        // a method to get Width, Height, Duration in Ticks, and bitrate for a video
-        public static Metadata GetVideoInfo(string fileName)
+        int closest = supportedQualities.Aggregate((x, y) => Math.Abs(x - quality) < Math.Abs(y - quality) ? x : y);
+        return closest;
+    }
+}
+
+public class AudioSource : Source
+{
+    public string label { get; set; }
+    public string language { get; set; }
+
+    public static Dictionary<string, string> MIMEMap = new()
+    {
+        { ".aac",  "audio/aac" },
+        { ".mp3",  "audio/mpeg" },
+        { ".mpga", "audio/mpeg" },
+        { ".ogg",  "audio/ogg" },
+        { ".oga",  "audio/ogg" },
+    };
+
+    public AudioSource(string path, string folderPrefix)
+    {
+        filepath = path;
+        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        contentType = MIMEMap[Extension()];
+        label = Title();
+        language = "EN";
+    }
+
+    public static bool IsFileValid(string path)
+    {
+        foreach (KeyValuePair<string, string> entry in MIMEMap)
         {
-            var inputFile = new MediaFile { Filename = fileName };
-
-            using (var engine = new Engine())
+            if (path.EndsWith(entry.Key.ToString()))
             {
-                engine.GetMetadata(inputFile);
+                return true;
             }
-
-            return inputFile.Metadata;
         }
+        return false;
+    }
+}
 
-        public class Source
+public class TextSource : Source
+{
+    public string name { get; set; }
+    public bool @default { get; set; }
+
+    public static Dictionary<string, string> MIMEMap = new()
+    {
+        { ".vtt",  "text/vtt" },
+    };
+
+    public TextSource(string path, string folderPrefix)
+    {
+        filepath = path;
+        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        contentType = MIMEMap[Extension()];
+        name = Title();
+    }
+
+    public static bool IsFileValid(string path)
+    {
+        foreach (KeyValuePair<string, string> entry in MIMEMap)
         {
-            public string url { get; set; }
-            public string contentType { get; set; }
-            public int quality { get; set; }
-            public int bitrate { get; set; }
-            public long duration { get; set; }
+            if (path.EndsWith(entry.Key.ToString()))
+            {
+                return true;
+            }
         }
+        return false;
+    }
 
-        public class TextTrack
+    public bool ShouldSerializedefault()
+    {
+        return @default;
+    }
+}
+
+public static class ffprobe
+{
+    public static string RunCommand(string args)
+    {
+        string output = "";
+        using (var ffprobe = Process.Start(new ProcessStartInfo
         {
-            public string url { get; set; }
-            public string contentType { get; set; }
-            public string name { get; set; }
-            public bool isDefault { get; set; }
-        }
-
-        // Read the config file
-        private static IConfiguration BuildConfig()
+            FileName = "ffprobe",
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardOutput = true
+        }))
         {
-            // this whole thing is very questionable.
-            // All these give me the temp file the single-file app created.
-            // - System.Reflection.Assembly.GetEntryAssembly().Location 
-            // - AppDomain.CurrentDomain.BaseDirectory
-            // - Path.GetDirectoryName(Assembly.GetEntryAssembly().Location)
-            // - System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
-            // - System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)
-            // These give me the path of the media files, not the exe.
-            // - System.IO.Directory.GetCurrentDirectory()
-            // - Environment.CurrentDirectory
-            // This outputs "Unhandled exception. System.ArgumentException: The path must be absolute. (Parameter 'root')"
-            // - System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase)
-            //
-            // In the end I had to use System.Diagnostics and Process.GetCurrentProcess() to get the path of the REAL exe,
-            // and then some finagling to remove the name of the exe.
-
-            var configlocation = Process.GetCurrentProcess().MainModule.FileName;
-            var filename = Process.GetCurrentProcess().ProcessName;
-
-            return new ConfigurationBuilder()
-                .SetBasePath(configlocation.Substring(0, configlocation.Length - (filename.Length + 5)))
-                .AddJsonFile("config.json")
-                .Build();
+            output = ffprobe.StandardOutput.ReadToEnd();
         }
+
+        if (string.IsNullOrWhiteSpace(output)) { throw new Exception("ffprobe output empty."); }
+        return output;
+    }
+
+    public static int Duration(string path)
+    {
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 " + path);
+        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe duration output."); }
+        return (int)duration;
+    }
+
+    public static int Bitrate(string path)
+    {
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 " + path);
+        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe bitrate output."); }
+        return (int)duration;
+    }
+
+    public static int Quality(string path)
+    {
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 " + path);
+        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe quality output."); }
+        return (int)duration;
+    }
+}
+
+public class ProgramConfig
+{
+    public string BaseURL { get; set; } = "https://example.com/cytube";
+    public bool CreateHTAccess { get; set; } = false;
+    public static string ConfigFile = AppDomain.CurrentDomain.BaseDirectory + "/config.json";
+
+    public static void CreateConfigIfMissing()
+    {
+        if(File.Exists(ConfigFile))
+        {
+            return;
+        }
+
+        using (var stream = File.Create(ConfigFile))
+        {
+            string cfgString = JsonConvert.SerializeObject(new ProgramConfig(), Formatting.Indented);
+            var cfgBytes = Encoding.UTF8.GetBytes(cfgString);
+            var cfgBytesLen = Encoding.UTF8.GetByteCount(cfgString);
+            stream.Write(cfgBytes, 0, cfgBytesLen);
+        }
+    }
+
+    public static ProgramConfig LoadConfig()
+    {
+        var configText = string.Join("\n", File.ReadAllText(ConfigFile));
+        ProgramConfig config = JsonConvert.DeserializeObject<ProgramConfig>(configText);
+        if (config == null)
+        {
+            throw new Exception($"Error deserializing config.json.");
+        }
+
+        config.BaseURL = config.BaseURL.TrimEnd('/');
+
+        return config;
     }
 }
