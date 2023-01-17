@@ -25,20 +25,17 @@ Apache users: Enable "CreateHTAccess" to automatically create an .htaccess file.
 
 # Accepted Files
 
-Info referenced from here: https://github.com/calzoneman/sync/blob/3.0/docs/custom-media.md#Manifest_Format
-
 #### Video:
-.mp4
-.webm
-.ogv
+* .mp4
+* .webm
+* .ogv
 
 #### Audio:
-.aac
-.mp3
-.mp4a
-.mpga
-.ogg
-.oga
+* .aac
+* .mp3
+* .mpga
+* .ogg
+* .oga
 
 #### Text:
-.vtt
+* .vtt
