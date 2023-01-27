@@ -11,71 +11,55 @@ internal class Program
         try
         {
             ProgramConfig.CreateConfigIfMissing();
-        }
-        catch (Exception exc)
-        {
-            Console.WriteLine("Error created config.json:\n" + exc.ToString());
-            ExitPrompt();
-        }
-        config = ProgramConfig.LoadConfig();
+            config = ProgramConfig.LoadConfig();
 
-        if(!config.BaseURL.StartsWith("https://"))
-        {
-            Console.WriteLine("Base URL does not begin with \"https://\".");
-            Console.WriteLine("Cytube will reject your media - aborting.");
-            ExitPrompt();
-        }
-
-        if (args.Length < 1)
-        {
-            Console.WriteLine($"Usage: {Process.GetCurrentProcess().ProcessName}.exe media_file.mp4 text_track.vtt");
-            Console.WriteLine($"       Alternatively drag and drop media files onto the executable.");
-            ExitPrompt();
-        }
-
-        string folderPrefix = "";
-        if (args.Length == 1 && Directory.Exists(args[0]))
-        {
-            var directoryInfo = new DirectoryInfo(args[0]);
-            folderPrefix = directoryInfo.Name + "/";
-            var fileList = Directory.GetFiles(directoryInfo.FullName);
-            args = fileList;
-        }
-
-        Manifest manifest = ProcessFiles(args, folderPrefix);
-        if(manifest.sources.Count == 0)
-        {
-            Console.WriteLine("Unable to create manifest: No primary source found.");
-            ExitPrompt();
-        }
-
-        string outputFolder = Path.GetDirectoryName(manifest.sources.First().filepath);
-        string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
-        string jsonFilePath = Path.Combine(outputFolder, manifest.sources.First().FilenameNoExtension() + ".json");
-        try
-        {
-            File.WriteAllText(jsonFilePath, jsonText);
-        }
-        catch (Exception exc)
-        {
-            Console.WriteLine("Error writing json file:\n" + exc.ToString());
-            ExitPrompt();
-        }
-
-        Console.WriteLine("Wrote manifest to " + jsonFilePath);
-
-        if(config.CreateHTAccess && manifest.textTracks.Count > 0)
-        {
-            try
+            if (!config.BaseURL.StartsWith("https://"))
             {
-                File.WriteAllText(Path.Combine(outputFolder, ".htaccess"), "Header set Access-Control-Allow-Origin \"*\"");
-            }
-            catch (Exception exc)
-            {
-                Console.WriteLine("Error writing .htaccess:\n" + exc.ToString());
+                Console.WriteLine("Base URL does not begin with \"https://\".");
+                Console.WriteLine("Cytube will reject your media - aborting.");
                 ExitPrompt();
             }
-            Console.WriteLine("Wrote htaccess to " + outputFolder);
+
+            if (args.Length < 1)
+            {
+                Console.WriteLine($"Usage: {Process.GetCurrentProcess().ProcessName}.exe media_file.mp4 text_track.vtt");
+                Console.WriteLine($"       Alternatively drag and drop media files onto the executable.");
+                ExitPrompt();
+            }
+
+            string folderPrefix = "";
+            if (args.Length == 1 && Directory.Exists(args[0]))
+            {
+                var directoryInfo = new DirectoryInfo(args[0]);
+                folderPrefix = directoryInfo.Name + "/";
+                var fileList = Directory.GetFiles(directoryInfo.FullName);
+                args = fileList;
+            }
+
+            Manifest manifest = ProcessFiles(args, folderPrefix);
+            if (manifest.sources.Count == 0)
+            {
+                Console.WriteLine("Unable to create manifest: No primary source found.");
+                ExitPrompt();
+            }
+
+            string outputFolder = Path.GetDirectoryName(manifest.sources.First().filepath);
+            string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
+            string jsonFilePath = Path.Combine(outputFolder, manifest.sources.First().FilenameNoExtension() + ".json");
+            File.WriteAllText(jsonFilePath, jsonText);
+            Console.WriteLine("Wrote manifest to " + jsonFilePath);
+
+            if (config.CreateHTAccess && manifest.textTracks.Count > 0)
+            {
+                File.WriteAllText(Path.Combine(outputFolder, ".htaccess"), "Header set Access-Control-Allow-Origin \"*\"");
+                Console.WriteLine("Wrote htaccess to " + outputFolder);
+            }
+        }
+        catch (Exception exc)
+        {
+            Console.WriteLine(exc.ToString());
+            Console.WriteLine();
+            ExitPrompt();
         }
     }
 
