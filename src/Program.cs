@@ -321,21 +321,21 @@ public static class ffprobe
 
     public static int Duration(string path)
     {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 " + path);
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
         if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe duration output."); }
         return (int)duration;
     }
 
     public static int Bitrate(string path)
     {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 " + path);
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
         if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe bitrate output."); }
         return (int)duration;
     }
 
     public static int Quality(string path)
     {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 " + path);
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
         if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe quality output."); }
         return (int)duration;
     }
