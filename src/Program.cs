@@ -8,7 +8,15 @@ internal class Program
 
     private static void Main(string[] args)
     {
-        ProgramConfig.CreateConfigIfMissing();
+        try
+        {
+            ProgramConfig.CreateConfigIfMissing();
+        }
+        catch (Exception exc)
+        {
+            Console.WriteLine("Error created config.json:\n" + exc.ToString());
+            ExitPrompt();
+        }
         config = ProgramConfig.LoadConfig();
 
         if(!config.BaseURL.StartsWith("https://"))
@@ -43,13 +51,31 @@ internal class Program
 
         string outputFolder = Path.GetDirectoryName(manifest.sources.First().filepath);
         string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
-        File.WriteAllText(outputFolder + "/" + manifest.sources.First().FilenameNoExtension() + ".json", jsonText);
+        string jsonFilePath = Path.Combine(outputFolder, manifest.sources.First().FilenameNoExtension() + ".json");
+        try
+        {
+            File.WriteAllText(jsonFilePath, jsonText);
+        }
+        catch (Exception exc)
+        {
+            Console.WriteLine("Error writing json file:\n" + exc.ToString());
+            ExitPrompt();
+        }
+
+        Console.WriteLine("Wrote manifest to " + jsonFilePath);
 
         if(config.CreateHTAccess && manifest.textTracks.Count > 0)
         {
-            File.WriteAllText(outputFolder + "/.htaccess", "Header set Access-Control-Allow-Origin \"*\"");
+            try
+            {
+                File.WriteAllText(Path.Combine(outputFolder, ".htaccess"), "Header set Access-Control-Allow-Origin \"*\"");
+            }
+            catch (Exception exc)
+            {
+                Console.WriteLine("Error writing .htaccess:\n" + exc.ToString());
+                ExitPrompt();
+            }
             Console.WriteLine("Wrote htaccess to " + outputFolder);
-            ExitPrompt();
         }
     }
 
