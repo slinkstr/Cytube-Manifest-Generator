@@ -36,20 +36,26 @@ internal class Program
                 args = fileList;
             }
 
+            Console.WriteLine("Processing files...");
             Manifest manifest = ProcessFiles(args, folderPrefix);
-            if (manifest.sources.Count == 0)
+            if (manifest.Sources.Count == 0)
             {
                 Console.WriteLine("Unable to create manifest: No primary source found.");
                 ExitPrompt();
             }
 
-            string outputFolder = Path.GetDirectoryName(manifest.sources.First().filepath);
+            string outputFolder = AppDomain.CurrentDomain.BaseDirectory;
+            if (!manifest.Sources.First().IsWebResource())
+            {
+                outputFolder = Path.GetDirectoryName(manifest.Sources.First().Filepath);
+            }
+
             string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
-            string jsonFilePath = Path.Combine(outputFolder, manifest.sources.First().FilenameNoExtension() + ".json");
+            string jsonFilePath = Path.Combine(outputFolder, manifest.Sources.First().FilenameNoExtension() + ".json");
             File.WriteAllText(jsonFilePath, jsonText);
             Console.WriteLine("Wrote manifest to " + jsonFilePath);
 
-            if (config.CreateHTAccess && manifest.textTracks.Count > 0)
+            if (config.CreateHTAccess && manifest.TextTracks.Count > 0)
             {
                 File.WriteAllText(Path.Combine(outputFolder, ".htaccess"), "Header set Access-Control-Allow-Origin \"*\"");
                 Console.WriteLine("Wrote htaccess to " + outputFolder);
@@ -73,21 +79,21 @@ internal class Program
             if(VideoSource.IsFileValid(file))
             {
                 VideoSource vid = new VideoSource(file, folderPrefix);
-                manifest.sources.Add(vid);
+                manifest.Sources.Add(vid);
                 if(firstSource)
                 {
-                    manifest.title = vid.Title();
-                    manifest.duration = vid.duration;
+                    manifest.Title = vid.Title();
+                    manifest.Duration = vid.Duration;
                     firstSource = false;
                 }
             }
             else if (AudioSource.IsFileValid(file))
             {
-                manifest.audioTracks.Add(new AudioSource(file, folderPrefix));
+                manifest.AudioTracks.Add(new AudioSource(file, folderPrefix));
             }
             else if (TextSource.IsFileValid(file))
             {
-                manifest.textTracks.Add(new TextSource(file, folderPrefix));
+                manifest.TextTracks.Add(new TextSource(file, folderPrefix));
             }
             else
             {
@@ -108,24 +114,32 @@ internal class Program
 
 public class Manifest
 {
-    public string title { get; set; }
-    public int duration { get; set; }
-    public bool live { get; set; } = false;
-    public List<VideoSource> sources { get; set; } = new List<VideoSource>();
-    public List<AudioSource> audioTracks { get; set; } = new List<AudioSource>();
-    public List<TextSource> textTracks { get; set; } = new List<TextSource>();
+    [JsonProperty(PropertyName = "title")]
+    public string Title { get; set; }
+    [JsonProperty(PropertyName = "duration")]
+    public int Duration { get; set; }
+    [JsonProperty(PropertyName = "live")]
+    public bool Live { get; set; } = false;
+    [JsonProperty(PropertyName = "sources")]
+    public List<VideoSource> Sources { get; set; } = new List<VideoSource>();
+    [JsonProperty(PropertyName = "audioTracks")]
+    public List<AudioSource> AudioTracks { get; set; } = new List<AudioSource>();
+    [JsonProperty(PropertyName = "textTracks")]
+    public List<TextSource> TextTracks { get; set; } = new List<TextSource>();
 }
 
 public class Source
 {
     [JsonIgnore]
-    public string filepath { get; set; }
-    public string url { get; set; }
-    public string contentType { get; set; }
+    public string Filepath { get; set; }
+    [JsonProperty(PropertyName = "url")]
+    public string Url { get; set; }
+    [JsonProperty(PropertyName = "contentType")]
+    public string ContentType { get; set; }
 
     public string Filename()
     {
-        return Path.GetFileName(filepath);
+        return Path.GetFileName(Filepath);
     }
 
     public string FilenameNoExtension()
@@ -133,7 +147,7 @@ public class Source
         int lastPeriodIndex = Filename().LastIndexOf(".");
         if (lastPeriodIndex == -1)
         {
-            throw new Exception("No file extension found for " + filepath);
+            throw new Exception("No file extension found for " + Filepath);
         }
 
         return Filename()[..lastPeriodIndex];
@@ -144,7 +158,7 @@ public class Source
         int lastPeriodIndex = Filename().LastIndexOf(".");
         if (lastPeriodIndex == -1)
         {
-            throw new Exception("No file extension found for " + filepath);
+            throw new Exception("No file extension found for " + Filepath);
         }
 
         return Filename()[lastPeriodIndex..];
@@ -154,14 +168,38 @@ public class Source
     {
         return FilenameNoExtension().Replace("_", " ");
     }
+
+    public bool IsWebResource()
+    {
+        if (!Uri.TryCreate(Filepath, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttp)
+        {
+            throw new Exception("Cytube will reject insecure resources - use HTTPS. File path: " + Filepath);
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttps)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
 }
 
 public class VideoSource : Source
 {
-    public int quality { get; set; }
-    public int bitrate { get; set; }
+    [JsonProperty(PropertyName = "quality")]
+    public int Quality { get; set; }
+    [JsonProperty(PropertyName = "bitrate")]
+    public int Bitrate { get; set; }
     [JsonIgnore]
-    public int duration { get; set; } // not required for the source but a useful property to have
+    public int Duration { get; set; } // not required for the source but a useful property to have
 
     public static Dictionary<string, string> MIMEMap = new()
     {
@@ -172,12 +210,21 @@ public class VideoSource : Source
 
     public VideoSource(string path, string folderPrefix)
     {
-        filepath = path;
-        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
-        contentType = MIMEMap[Extension()];
-        quality = GetClosestQuality(ffprobe.Quality(filepath));
-        bitrate = ffprobe.Bitrate(filepath) / 1000;
-        duration = ffprobe.Duration(filepath);
+        Filepath = path;
+        if (IsWebResource())
+        {
+            Url = path;
+        }
+        else
+        {
+            Url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        }
+        ContentType = MIMEMap[Extension()];
+
+        var ffprobeProps = ffprobe.GetFileProperties(path);
+        Quality = GetClosestQuality(ffprobeProps.Quality);
+        Bitrate = ffprobeProps.Bitrate / 1000;
+        Duration = ffprobeProps.Duration;
     }
 
     public static bool IsFileValid(string path)
@@ -213,8 +260,10 @@ public class VideoSource : Source
 
 public class AudioSource : Source
 {
-    public string label { get; set; }
-    public string language { get; set; }
+    [JsonProperty(PropertyName = "label")]
+    public string Label { get; set; }
+    [JsonProperty(PropertyName = "language")]
+    public string Language { get; set; }
 
     public static Dictionary<string, string> MIMEMap = new()
     {
@@ -227,11 +276,18 @@ public class AudioSource : Source
 
     public AudioSource(string path, string folderPrefix)
     {
-        filepath = path;
-        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
-        contentType = MIMEMap[Extension()];
-        label = Title();
-        language = "EN";
+        Filepath = path;
+        if (IsWebResource())
+        {
+            Url = path;
+        }
+        else
+        {
+            Url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        }
+        ContentType = MIMEMap[Extension()];
+        Label = Title();
+        Language = "EN";
     }
 
     public static bool IsFileValid(string path)
@@ -249,8 +305,10 @@ public class AudioSource : Source
 
 public class TextSource : Source
 {
-    public string name { get; set; }
-    public bool @default { get; set; }
+    [JsonProperty(PropertyName = "name")]
+    public string Name { get; set; }
+    [JsonProperty(PropertyName = "default")]
+    public bool Default { get; set; }
 
     public static Dictionary<string, string> MIMEMap = new()
     {
@@ -259,10 +317,17 @@ public class TextSource : Source
 
     public TextSource(string path, string folderPrefix)
     {
-        filepath = path;
-        url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
-        contentType = MIMEMap[Extension()];
-        name = Title();
+        Filepath = path;
+        if (IsWebResource())
+        {
+            Url = path;
+        }
+        else
+        {
+            Url = Program.config.BaseURL + "/" + folderPrefix + Path.GetFileName(path);
+        }
+        ContentType = MIMEMap[Extension()];
+        Name = Title();
     }
 
     public static bool IsFileValid(string path)
@@ -279,7 +344,7 @@ public class TextSource : Source
 
     public bool ShouldSerializedefault()
     {
-        return @default;
+        return Default;
     }
 }
 
@@ -303,25 +368,44 @@ public static class ffprobe
         return output;
     }
 
-    public static int Duration(string path)
+    //public static int Duration(string path)
+    //{
+    //    string output = RunCommand("-v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
+    //    if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe duration output."); }
+    //    return (int)duration;
+    //}
+
+    //public static int Bitrate(string path)
+    //{
+    //    string output = RunCommand("-v error -select_streams v:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
+    //    if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe bitrate output."); }
+    //    return (int)duration;
+    //}
+
+    //public static int Quality(string path)
+    //{
+    //    string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
+    //    if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe quality output."); }
+    //    return (int)duration;
+    //}
+
+    public static FfprobeProperties GetFileProperties(string path)
     {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
-        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe duration output."); }
-        return (int)duration;
+        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -show_entries stream=duration -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
+        string[] outputSplit = output.Split("\n", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return new FfprobeProperties()
+        {
+            Quality = int.Parse(outputSplit[0]),
+            Duration = (int)float.Parse(outputSplit[1]),
+            Bitrate = int.Parse(outputSplit[2]),
+        };
     }
 
-    public static int Bitrate(string path)
+    public class FfprobeProperties
     {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
-        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe bitrate output."); }
-        return (int)duration;
-    }
-
-    public static int Quality(string path)
-    {
-        string output = RunCommand("-v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 \"" + path + "\"");
-        if (!float.TryParse(output, out var duration)) { throw new Exception("Unable to parse ffprobe quality output."); }
-        return (int)duration;
+        public int Quality;
+        public int Duration;
+        public int Bitrate;
     }
 }
 
