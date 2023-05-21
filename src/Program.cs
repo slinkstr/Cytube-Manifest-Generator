@@ -22,9 +22,23 @@ internal class Program
 
             if (args.Length < 1)
             {
-                Console.WriteLine($"Usage: {Process.GetCurrentProcess().ProcessName}.exe media_file.mp4 text_track.vtt");
-                Console.WriteLine($"       Alternatively drag and drop media files onto the executable.");
-                ExitPrompt();
+                Console.WriteLine("Enter file path or URL for source(s), enter blank to stop:");
+                while (true)
+                {
+                    string? src = Console.ReadLine();
+                    if(string.IsNullOrWhiteSpace(src))
+                    {
+                        break;
+                    }
+                    args = args.Append(src).ToArray();
+                    Console.WriteLine("More?");
+                }
+                if(args.Length < 1)
+                {
+                    Console.WriteLine($"Usage: {Process.GetCurrentProcess().ProcessName}.exe media_file.mp4 text_track.vtt");
+                    Console.WriteLine($"       Alternatively drag and drop media files onto the executable.");
+                    ExitPrompt();
+                }
             }
 
             string folderPrefix = "";
