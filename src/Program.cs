@@ -4,7 +4,7 @@ using Newtonsoft.Json;
 
 internal class Program
 {
-    public static ProgramConfig config;
+    public static ProgramConfig? config;
 
     private static void Main(string[] args)
     {
@@ -61,7 +61,7 @@ internal class Program
             string outputFolder = AppDomain.CurrentDomain.BaseDirectory;
             if (!manifest.Sources.First().IsWebResource())
             {
-                outputFolder = Path.GetDirectoryName(manifest.Sources.First().Filepath);
+                outputFolder = Path.GetDirectoryName(manifest.Sources.First().Filepath) ?? throw new Exception("Error getting output folder.");
             }
 
             string jsonText = JsonConvert.SerializeObject(manifest, Formatting.Indented);
@@ -113,6 +113,11 @@ internal class Program
             {
                 Console.WriteLine("File was not valid: " + file);
             }
+        }
+
+        if(manifest.TextTracks.Count > 0)
+        {
+            manifest.TextTracks[0].Default = true;
         }
 
         return manifest;
@@ -321,7 +326,7 @@ public class TextSource : Source
 {
     [JsonProperty(PropertyName = "name")]
     public string Name { get; set; }
-    [JsonProperty(PropertyName = "default")]
+    [JsonProperty(PropertyName = "default", DefaultValueHandling = DefaultValueHandling.Ignore)]
     public bool Default { get; set; }
 
     public static Dictionary<string, string> MIMEMap = new()
